@@ -1,0 +1,5 @@
+Testing word count program:
+-giving input with duplicate blank spaces
+-giving input with duplicate tabs
+-giving input with multiple multiple new lines with empty words
+-giving empty input
