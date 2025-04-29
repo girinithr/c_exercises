@@ -1,0 +1,88 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <openssl/sha.h>
+#include <openssl/bio.h>
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
+
+#define BUFFER_SIZE 4096
+
+void decode_frame(const unsigned char *frame, int frame_len) {
+    if (frame_len < 2) return;
+    int offset = 2;
+    uint64_t payload_len = frame[1] & 0x7F;
+
+    if (payload_len == 126) {
+        payload_len = (frame[2] << 8) | frame[3];
+        offset += 2;
+    } else if (payload_len == 127) {
+        payload_len = 0;
+        for (int i = 0; i < 8; ++i)
+            payload_len = (payload_len << 8) | frame[offset + i];
+        offset += 8;
+    }
+
+    char message[BUFFER_SIZE];
+    memcpy(message, frame + offset, payload_len);
+    message[payload_len] = '\0';
+    printf("Received: %s\n", message);
+}
+
+void *receive_thread(void *arg) {
+    int sockfd = *(int *)arg;
+    unsigned char buffer[BUFFER_SIZE];
+    while (1) {
+        int len = recv(sockfd, buffer, sizeof(buffer), 0);
+        if (len <= 0) break;
+        decode_frame(buffer, len);
+    }
+    return NULL;
+}
+
+int main() {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in serv_addr = {.sin_family = AF_INET, .sin_port = htons(8080)};
+    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+    connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+
+    char req[512];
+    snprintf(req, sizeof(req),
+             "GET / HTTP/1.1\r\n"
+             "Host: localhost:8080\r\n"
+             "Upgrade: websocket\r\n"
+             "Connection: Upgrade\r\n"
+             "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\n"
+             "Sec-WebSocket-Version: 13\r\n\r\n");
+    send(sockfd, req, strlen(req), 0);
+    recv(sockfd, req, sizeof(req), 0); // discard handshake response
+
+    pthread_t t;
+    pthread_create(&t, NULL, receive_thread, &sockfd);
+
+    char input[1024];
+    while (fgets(input, sizeof(input), stdin)) {
+        size_t len = strlen(input);
+        if (input[len - 1] == '\n') input[--len] = '\0';
+
+        unsigned char frame[2 + len + 4];
+        frame[0] = 0x81;
+        frame[1] = 0x80 | len;
+
+        unsigned char mask[4] = {rand(), rand(), rand(), rand()};
+        memcpy(&frame[2], mask, 4);
+        for (size_t i = 0; i < len; i++) {
+            frame[6 + i] = input[i] ^ mask[i % 4];
+        }
+
+        send(sockfd, frame, 6 + len, 0);
+    }
+
+    close(sockfd);
+    return 0;
+}
+
