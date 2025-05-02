@@ -1,0 +1,238 @@
+// tic_tac_toe_server.c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/epoll.h>
+#include <openssl/sha.h>
+#include <openssl/bio.h>
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
+
+#define MAX_CLIENTS 100
+#define MAX_EVENTS 10
+#define BUFFER_SIZE 4096
+
+int clients[MAX_CLIENTS];
+int pair[MAX_CLIENTS];
+
+typedef struct {
+    int client_x;
+    int client_o;
+    char board[3][3];
+    int turn;  // 0 for X's turn, 1 for O's turn
+} Game;
+
+Game games[MAX_CLIENTS / 2];
+int game_count = 0;
+
+char *base64_encode(const unsigned char *input, int length) {
+    BIO *bmem, *b64;
+    BUF_MEM *bptr;
+    b64 = BIO_new(BIO_f_base64());
+    bmem = BIO_new(BIO_s_mem());
+    b64 = BIO_push(b64, bmem);
+    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+    BIO_write(b64, input, length);
+    BIO_flush(b64);
+    BIO_get_mem_ptr(b64, &bptr);
+    char *buff = (char *)malloc(bptr->length + 1);
+    memcpy(buff, bptr->data, bptr->length);
+    buff[bptr->length] = 0;
+    BIO_free_all(b64);
+    return buff;
+}
+
+void perform_handshake(int client_fd) {
+    char buffer[BUFFER_SIZE];
+    recv(client_fd, buffer, sizeof(buffer), 0);
+
+    char *key_header = strstr(buffer, "Sec-WebSocket-Key:");
+    if (!key_header) return;
+    key_header += 19;
+    char client_key[128] = {0};
+    sscanf(key_header, "%s", client_key);
+
+    char combined[256];
+    snprintf(combined, sizeof(combined), "%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", client_key);
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)combined, strlen(combined), hash);
+    char *encoded = base64_encode(hash, SHA_DIGEST_LENGTH);
+
+    char response[512];
+    snprintf(response, sizeof(response),
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: %s\r\n\r\n", encoded);
+    send(client_fd, response, strlen(response), 0);
+    free(encoded);
+}
+
+void send_ws_message(int client_fd, const char *msg) {
+    size_t len = strlen(msg);
+    unsigned char frame[10 + len];
+    int idx = 0;
+    frame[idx++] = 0x81;
+    if (len <= 125) {
+        frame[idx++] = len;
+    } else if (len <= 65535) {
+        frame[idx++] = 126;
+        frame[idx++] = (len >> 8) & 0xFF;
+        frame[idx++] = len & 0xFF;
+    } else {
+        frame[idx++] = 127;
+        for (int i = 7; i >= 0; --i)
+            frame[idx++] = (len >> (8 * i)) & 0xFF;
+    }
+    memcpy(frame + idx, msg, len);
+    send(client_fd, frame, idx + len, 0);
+}
+
+Game* get_game_for_client(int fd) {
+    for (int i = 0; i < game_count; i++) {
+        if (games[i].client_x == fd || games[i].client_o == fd)
+            return &games[i];
+    }
+    return NULL;
+}
+
+int check_winner(char board[3][3], char symbol) {
+    for (int i = 0; i < 3; i++) {
+        if (board[i][0] == symbol && board[i][1] == symbol && board[i][2] == symbol) return 1;
+        if (board[0][i] == symbol && board[1][i] == symbol && board[2][i] == symbol) return 1;
+    }
+    if (board[0][0] == symbol && board[1][1] == symbol && board[2][2] == symbol) return 1;
+    if (board[0][2] == symbol && board[1][1] == symbol && board[2][0] == symbol) return 1;
+    return 0;
+}
+
+void handle_frame(int client_fd) {
+    unsigned char buffer[BUFFER_SIZE];
+    int len = recv(client_fd, buffer, sizeof(buffer), 0);
+    if (len <= 0) return;
+
+    int offset = 2;
+    uint64_t payload_len = buffer[1] & 0x7F;
+    if (payload_len == 126) {
+        payload_len = (buffer[2] << 8) | buffer[3];
+        offset += 2;
+    } else if (payload_len == 127) {
+        payload_len = 0;
+        for (int i = 0; i < 8; ++i)
+            payload_len = (payload_len << 8) | buffer[offset + i];
+        offset += 8;
+    }
+
+    unsigned char mask[4];
+    memcpy(mask, &buffer[offset], 4);
+    offset += 4;
+
+    char message[BUFFER_SIZE];
+    for (uint64_t i = 0; i < payload_len; ++i)
+        message[i] = buffer[offset + i] ^ mask[i % 4];
+    message[payload_len] = '\0';
+
+    Game *g = get_game_for_client(client_fd);
+    if (!g) return;
+
+    int is_x = (client_fd == g->client_x);
+    if (g->turn != (is_x ? 0 : 1)) {
+        send_ws_message(client_fd, "Not your turn.");
+        return;
+    }
+
+    int pos = atoi(message);
+    if (pos < 1 || pos > 9) {
+        send_ws_message(client_fd, "Invalid move. Choose 1-9.");
+        return;
+    }
+    int row = (pos - 1) / 3, col = (pos - 1) % 3;
+    if (g->board[row][col] != ' ') {
+        send_ws_message(client_fd, "Cell already taken.");
+        return;
+    }
+
+    char symbol = is_x ? 'X' : 'O';
+    g->board[row][col] = symbol;
+
+    char board_msg[256], *p = board_msg;
+    p += sprintf(p, "Move: %c -> %d\n", symbol, pos);
+    for (int i = 0; i < 3; i++)
+        p += sprintf(p, "%c|%c|%c\n", g->board[i][0], g->board[i][1], g->board[i][2]);
+
+    if (check_winner(g->board, symbol)) {
+        send_ws_message(g->client_x, symbol == 'X' ? "You win!\n" : "You lose!\n");
+        send_ws_message(g->client_o, symbol == 'O' ? "You win!\n" : "You lose!\n");
+        send_ws_message(g->client_x, board_msg);
+        send_ws_message(g->client_o, board_msg);
+        return;
+    }
+
+    int draw = 1;
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++)
+            if (g->board[i][j] == ' ') draw = 0;
+
+    if (draw) {
+        send_ws_message(g->client_x, "Draw!\n");
+        send_ws_message(g->client_o, "Draw!\n");
+        return;
+    }
+
+    g->turn = 1 - g->turn;
+    send_ws_message(g->client_x, board_msg);
+    send_ws_message(g->client_o, board_msg);
+    send_ws_message(g->turn == 0 ? g->client_x : g->client_o, "Your move:");
+}
+
+int main() {
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(8080), .sin_addr.s_addr = INADDR_ANY};
+    bind(server_fd, (struct sockaddr *)&addr, sizeof(addr));
+    listen(server_fd, MAX_CLIENTS);
+
+    int epoll_fd = epoll_create1(0);
+    struct epoll_event ev = {.events = EPOLLIN, .data.fd = server_fd};
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev);
+
+    int client_count = 0;
+    struct epoll_event events[MAX_EVENTS];
+
+    while (1) {
+        int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        for (int i = 0; i < nfds; i++) {
+            int fd = events[i].data.fd;
+            if (fd == server_fd) {
+                int client_fd = accept(server_fd, NULL, NULL);
+                fcntl(client_fd, F_SETFL, O_NONBLOCK);
+                ev.events = EPOLLIN;
+                ev.data.fd = client_fd;
+                epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev);
+                perform_handshake(client_fd);
+
+                clients[client_count] = client_fd;
+                pair[client_count] = (client_count % 2 == 0) ? -1 : clients[client_count - 1];
+                if (client_count % 2 == 1) {
+                    pair[client_count - 1] = client_fd;
+
+                    Game *g = &games[game_count++];
+                    g->client_x = clients[client_count - 1];
+                    g->client_o = client_fd;
+                    memset(g->board, ' ', sizeof(g->board));
+                    g->turn = 0;
+
+                    send_ws_message(g->client_x, "You are X. Your move first. Choose 1-9:");
+                    send_ws_message(g->client_o, "You are O. Wait for X to move.");
+                }
+                client_count++;
+            } else {
+                handle_frame(fd);
+            }
+        }
+    }
+    return 0;
+}
+
