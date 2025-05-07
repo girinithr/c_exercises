@@ -1,0 +1,26 @@
+body {
+    font-family: sans-serif;
+    background: #f5f5f5;
+    text-align: center;
+    margin-top: 50px;
+  }
+  
+  #status {
+    font-size: 1.5em;
+    margin-bottom: 20px;
+  }
+  
+  table {
+    margin: auto;
+    border-collapse: collapse;
+  }
+  
+  td {
+    width: 80px;
+    height: 80px;
+    font-size: 2em;
+    border: 2px solid #333;
+    cursor: pointer;
+    user-select: none;
+  }
+  
