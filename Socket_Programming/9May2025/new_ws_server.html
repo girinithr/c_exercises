@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tic Tac Toe WebSocket</title>
+  <style>
+    body {
+      font-family: monospace;
+      background-color: #f4f4f4;
+      padding: 20px;
+    }
+    #board {
+      white-space: pre;
+      font-size: 20px;
+      background-color: #fff;
+      padding: 10px;
+      border: 1px solid #ccc;
+    }
+    input[type="text"] {
+      font-size: 16px;
+      padding: 5px;
+      width: 150px;
+    }
+    button {
+      font-size: 16px;
+      padding: 6px 12px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Tic Tac Toe</h2>
+  <div id="board">Connecting...</div>
+  <br>
+  <input id="moveInput" type="text" placeholder="Enter move (1-9) or rematch">
+  <button onclick="sendMove()">Send</button>
+
+  <script>
+    const socket = new WebSocket("ws://localhost:8080");
+    const boardDiv = document.getElementById("board");
+    const input = document.getElementById("moveInput");
+
+    socket.onopen = () => {
+      boardDiv.textContent = "Connected. Waiting for a pair...";
+    };
+
+    socket.onmessage = (event) => {
+      boardDiv.textContent = event.data;
+    };
+
+    socket.onclose = () => {
+      boardDiv.textContent = "Connection closed.";
+    };
+
+    function sendMove() {
+      const msg = input.value.trim();
+      if (msg !== "") {
+        socket.send(msg);
+        input.value = "";
+      }
+    }
+
+    input.addEventListener("keyup", (event) => {
+      if (event.key === "Enter") {
+        sendMove();
+      }
+    });
+  </script>
+</body>
+</html>
+
