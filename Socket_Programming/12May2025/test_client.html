@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h2>WebSocket Test</h2>
+    <input type="text" id="msg" placeholder="Move (1-9)">
+    <button onclick="send()">Send</button>
+    <pre id="log"></pre>
+
+    <script>
+        const log = document.getElementById("log");
+        const ws = new WebSocket("ws://localhost:8080/");
+
+        ws.onopen = () => log.textContent += "Connected\n";
+        ws.onmessage = (e) => log.textContent += "Server: " + e.data + "\n";
+        ws.onerror = (e) => log.textContent += "Error: " + e + "\n";
+        ws.onclose = () => log.textContent += "Disconnected\n";
+
+        function send() {
+            const val = document.getElementById("msg").value;
+            ws.send(val);
+        }
+    </script>
+</body>
+</html>
+

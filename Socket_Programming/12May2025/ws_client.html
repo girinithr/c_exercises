@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tic Tac Toe Web Client</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      margin-top: 40px;
+    }
+    table {
+      margin: 0 auto;
+      border-collapse: collapse;
+    }
+    td {
+      width: 60px;
+      height: 60px;
+      font-size: 2em;
+      border: 2px solid black;
+      cursor: pointer;
+    }
+    td.disabled {
+      cursor: not-allowed;
+      background-color: #eee;
+    }
+    #log {
+      margin-top: 20px;
+      white-space: pre-wrap;
+      text-align: left;
+      width: 300px;
+      margin-left: auto;
+      margin-right: auto;
+      border: 1px solid #ccc;
+      padding: 10px;
+      height: 200px;
+      overflow-y: scroll;
+      background-color: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+  <h1>Tic Tac Toe</h1>
+  <table id="board">
+    <tr><td data-pos="1"></td><td data-pos="2"></td><td data-pos="3"></td></tr>
+    <tr><td data-pos="4"></td><td data-pos="5"></td><td data-pos="6"></td></tr>
+    <tr><td data-pos="7"></td><td data-pos="8"></td><td data-pos="9"></td></tr>
+  </table>
+
+  <div id="log"></div>
+
+  <script>
+    const ws = new WebSocket("ws://localhost:8080");
+    const logDiv = document.getElementById("log");
+    const board = document.getElementById("board");
+
+    function log(msg) {
+      logDiv.textContent += msg + "\n";
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    ws.onopen = () => {
+      log("Connected to server.");
+    };
+
+    ws.onmessage = (event) => {
+      const msg = event.data;
+      log(msg);
+      if (msg.includes("Move:")) {
+        updateBoardFromMessage(msg);
+      } else if (msg.includes("Your move")) {
+        enableBoard(true);
+      } else if (msg.includes("You win") || msg.includes("You lose") || msg.includes("Draw")) {
+        enableBoard(false);
+      } else if (msg.includes("Cell already taken") || msg.includes("Invalid move") || msg.includes("Not your turn")) {
+        enableBoard(true);
+      } else {
+        enableBoard(false);
+      }
+    };
+
+    ws.onerror = (err) => {
+      log("WebSocket error.");
+    };
+
+    function enableBoard(enable) {
+      document.querySelectorAll("#board td").forEach(td => {
+        td.classList.toggle("disabled", !enable);
+      });
+    }
+
+    function updateBoardFromMessage(message) {
+      const lines = message.split('\n');
+      const boardLines = lines.slice(-3); // last 3 lines are the board
+      boardLines.forEach((line, i) => {
+        const cells = line.split('|');
+        for (let j = 0; j < 3; j++) {
+          const pos = i * 3 + j + 1;
+          const td = document.querySelector(`td[data-pos="${pos}"]`);
+          td.textContent = cells[j] === ' ' ? '' : cells[j];
+        }
+      });
+    }
+
+    board.addEventListener("click", (e) => {
+      if (e.target.tagName === "TD" && !e.target.classList.contains("disabled")) {
+        const pos = e.target.getAttribute("data-pos");
+        ws.send(pos);
+        enableBoard(false);
+      }
+    });
+
+    // Initially disable the board
+    enableBoard(false);
+  </script>
+</body>
+</html>
+
