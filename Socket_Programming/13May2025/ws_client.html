@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tic Tac Toe</title>
+  <style>
+    table { border-collapse: collapse; margin-top: 20px; }
+    td {
+      width: 60px;
+      height: 60px;
+      text-align: center;
+      font-size: 24px;
+      border: 1px solid #000;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h2 id="status">Connecting...</h2>
+  <table id="board"></table>
+
+  <script>
+    let websocket = new WebSocket("ws://localhost:8080");
+    let symbol = null;
+    let myTurn = false;
+
+    websocket.onopen = () => {
+      document.getElementById("status").innerText = "Waiting for opponent...";
+    };
+
+    websocket.onmessage = (event) => {
+      const msg = event.data;
+
+      if (msg === "WAIT") {
+        document.getElementById("status").innerText = "Waiting for opponent...";
+      } else if (msg.startsWith("START")) {
+        symbol = msg.charAt(5);
+        myTurn = (symbol === 'X');
+        document.getElementById("status").innerText = "Game started! You are " + symbol;
+        createBoard();
+      } else if (msg.startsWith("WIN")) {
+        document.getElementById("status").innerText = "Winner: " + msg.charAt(3);
+        myTurn = false;
+      } else if (msg === "DRAW") {
+        document.getElementById("status").innerText = "It's a draw!";
+        myTurn = false;
+      } else {
+        const opponentSymbol = msg.charAt(0);
+        const pos = parseInt(msg.charAt(1)) - 1;
+        const cell = document.getElementById("cell" + pos);
+        if (cell && cell.innerText === "") {
+          cell.innerText = opponentSymbol;
+          myTurn = (opponentSymbol !== symbol);
+        }
+      }
+    };
+
+    websocket.onerror = (e) => {
+      console.error("WebSocket error:", e);
+    };
+
+    websocket.onclose = () => {
+      document.getElementById("status").innerText = "Connection closed";
+    };
+
+    function createBoard() {
+      const board = document.getElementById("board");
+      board.innerHTML = "";
+      for (let i = 0; i < 3; i++) {
+        const row = board.insertRow();
+        for (let j = 0; j < 3; j++) {
+          const cell = row.insertCell();
+          const idx = i * 3 + j;
+          cell.id = "cell" + idx;
+          cell.onclick = () => makeMove(idx);
+        }
+      }
+    }
+
+    function makeMove(idx) {
+      if (!myTurn) return;
+      const cell = document.getElementById("cell" + idx);
+      if (cell.innerText !== "") return;
+
+      websocket.send(String(idx + 1)); // Send 1 to 9
+      cell.innerText = symbol;
+      myTurn = false;
+    }
+  </script>
+</body>
+</html>
+
