@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tic Tac Toe</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 40px; }
+    table { border-collapse: collapse; margin: 0 auto; }
+    td { width: 80px; height: 80px; font-size: 36px; border: 2px solid #000; cursor: pointer; }
+    td.disabled { cursor: not-allowed; background-color: #f0f0f0; }
+    .hidden { display: none; }
+    input, button { padding: 6px; margin: 5px; }
+  </style>
+</head>
+<body>
+  <div id="loginForm">
+    <h2>Login or Register</h2>
+    <input id="username" placeholder="Username"><br>
+    <input id="password" placeholder="Password" type="password"><br>
+    <button onclick="login()">Submit</button>
+    <p id="loginStatus"></p>
+  </div>
+
+  <div id="modeSelect" class="hidden">
+    <h2>Welcome! Choose a mode:</h2>
+    <button onclick="chooseMode('PLAY')">Play</button>
+    <button onclick="chooseMode('WATCH')">Watch</button>
+  </div>
+
+  <h2 id="status" class="hidden">Connecting...</h2>
+  <table id="board" class="hidden"></table>
+
+  <script>
+    let socket = null;
+    let symbol = null;
+    let myTurn = false;
+    let isWatcher = false;
+
+    function login() {
+      socket = new WebSocket("ws://localhost:8080");
+      socket.onopen = () => {
+        const uname = document.getElementById("username").value;
+        const pwd = document.getElementById("password").value;
+        socket.send("LOGIN:" + uname + ":" + pwd);
+      };
+
+      socket.onmessage = (event) => {
+        const msg = event.data;
+
+        if (msg === "LOGIN_SUCCESS") {
+          document.getElementById("loginForm").classList.add("hidden");
+          document.getElementById("modeSelect").classList.remove("hidden");
+        } else if (msg === "LOGIN_FAIL") {
+          document.getElementById("loginStatus").innerText = "Login failed!";
+        } else if (msg.startsWith("START")) {
+          symbol = msg.charAt(5);
+          myTurn = (symbol === 'X');
+          document.getElementById("modeSelect").classList.add("hidden");
+          document.getElementById("status").classList.remove("hidden");
+          document.getElementById("status").innerText = `Game started! You are ${symbol}`;
+          document.getElementById("board").classList.remove("hidden");
+          createBoard();
+        } else if (msg === "WATCHING") {
+          isWatcher = true;
+          document.getElementById("modeSelect").classList.add("hidden");
+          document.getElementById("status").classList.remove("hidden");
+          document.getElementById("status").innerText = `Watching a game`;
+          document.getElementById("board").classList.remove("hidden");
+          createBoard();
+        } else if (msg.startsWith("WIN")) {
+          const winner = msg.charAt(3);
+          document.getElementById("status").innerText = `Winner: ${winner}`;
+          disableBoard();
+        } else if (msg === "DRAW") {
+          document.getElementById("status").innerText = "It's a draw!";
+          disableBoard();
+        } else {
+          const mark = msg.charAt(0);
+          const pos = parseInt(msg.charAt(1)) - 1;
+          const cell = document.getElementById("cell" + pos);
+          if (cell && cell.innerText === "") {
+            cell.innerText = mark;
+            if (!isWatcher) {
+              myTurn = (mark !== symbol);
+              document.getElementById("status").innerText = myTurn ? "Your turn" : "Opponent's turn";
+            }
+          }
+        }
+      };
+
+      socket.onerror = () => {
+        document.getElementById("status").innerText = "WebSocket error!";
+      };
+
+      socket.onclose = () => {
+        document.getElementById("status").innerText = "Connection closed.";
+        disableBoard();
+      };
+    }
+
+    function chooseMode(mode) {
+      socket.send("MODE:" + mode);
+    }
+
+    function createBoard() {
+      const board = document.getElementById("board");
+      board.innerHTML = "";
+      for (let i = 0; i < 3; i++) {
+        const row = board.insertRow();
+        for (let j = 0; j < 3; j++) {
+          const cell = row.insertCell();
+          const idx = i * 3 + j;
+          cell.id = "cell" + idx;
+          cell.addEventListener("click", () => handleClick(idx));
+        }
+      }
+    }
+
+    function disableBoard() {
+      for (let i = 0; i < 9; i++) {
+        const cell = document.getElementById("cell" + i);
+        if (cell) {
+          cell.classList.add("disabled");
+        }
+      }
+    }
+
+    function handleClick(idx) {
+      if (!myTurn || isWatcher) return;
+      const cell = document.getElementById("cell" + idx);
+      if (cell.innerText !== "") return;
+
+      socket.send(String(idx + 1));
+      cell.innerText = symbol;
+      myTurn = false;
+      document.getElementById("status").innerText = "Opponent's turn";
+    }
+  </script>
+</body>
+</html>
+
