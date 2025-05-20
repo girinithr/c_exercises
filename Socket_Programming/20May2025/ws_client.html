@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tic Tac Toe</title>
+  <style>
+    #board { display: grid; grid-template-columns: repeat(3, 100px); gap: 5px; margin-top: 20px; }
+    .cell { width: 100px; height: 100px; font-size: 40px; text-align: center; line-height: 100px; border: 1px solid #000; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h2>Tic Tac Toe</h2>
+  <div>
+    Username: <input id="username" type="text">
+    Password: <input id="password" type="password">
+    <button onclick="register()">Register</button>
+    <button onclick="login()">Login</button>
+  </div>
+  <div id="game-options" style="display:none">
+    <button onclick="send('PLAY')">Play</button>
+    <button onclick="send('WATCH')">Watch</button>
+  </div>
+  <div id="board"></div>
+  <div id="status"></div>
+
+  <script>
+    let ws;
+    let mark = '';
+
+    function connect() {
+      ws = new WebSocket('ws://' + location.hostname + ':8080');
+      ws.onmessage = (e) => {
+        let msg = e.data;
+        console.log('Message:', msg);
+        if (msg.startsWith('OK:')) document.getElementById('game-options').style.display = 'block';
+        else if (msg.startsWith('JOINED:')) document.getElementById('status').innerText = msg;
+        else if (msg.startsWith('X') || msg.startsWith('O')) {
+          let m = msg[0];
+          let p = parseInt(msg[1]) - 1;
+          document.getElementsByClassName('cell')[p].innerText = m;
+        } else if (msg.startsWith('WIN') || msg === 'DRAW') {
+          document.getElementById('status').innerText = msg;
+        } else {
+          document.getElementById('status').innerText = msg;
+        }
+      }
+    }
+
+    function login() {
+      connect();
+      setTimeout(() => {
+        let u = document.getElementById('username').value;
+        let p = document.getElementById('password').value;
+        ws.send(`LOGIN:${u}:${p}`);
+      }, 100);
+    }
+
+    function register() {
+      connect();
+      setTimeout(() => {
+        let u = document.getElementById('username').value;
+        let p = document.getElementById('password').value;
+        ws.send(`REGISTER:${u}:${p}`);
+      }, 100);
+    }
+
+    function send(msg) {
+      ws.send(msg);
+      if (msg === 'PLAY') setupBoard();
+    }
+
+    function setupBoard() {
+      let board = document.getElementById('board');
+      board.innerHTML = '';
+      for (let i = 0; i < 9; i++) {
+        let cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.onclick = () => {
+          if (ws && cell.innerText === '') ws.send((i+1).toString());
+        };
+        board.appendChild(cell);
+      }
+    }
+  </script>
+</body>
+</html>
+
