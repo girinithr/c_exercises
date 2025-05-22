@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Login/Register</title>
+</head>
+<body>
+  <h2>Login/Register</h2>
+  <div id="auth-section">
+    <input id="username" placeholder="Username"><br>
+    <input id="password" placeholder="Password" type="password"><br>
+    <button onclick="register()">Register</button>
+    <button onclick="login()">Login</button>
+  </div>
+
+  <div id="menu-section" style="display:none;">
+    <h3>Welcome!</h3>
+    <button onclick="choose('play')">Play</button>
+    <button onclick="choose('watch')">Watch</button>
+  </div>
+
+  <p id="status">Connecting...</p>
+
+  <script>
+    const socket = new WebSocket("ws://localhost:8080");
+
+    socket.onopen = () => {
+      document.getElementById("status").innerText = "Connected to server";
+    };
+
+    socket.onmessage = (event) => {
+      const msg = event.data;
+      document.getElementById("status").innerText = msg;
+
+      if (msg === "LOGIN_SUCCESS") {
+        // Hide login/register UI and show menu
+        document.getElementById("auth-section").style.display = "none";
+        document.getElementById("menu-section").style.display = "block";
+      }
+    };
+
+    socket.onclose = () => {
+      document.getElementById("status").innerText = "Disconnected from server";
+    };
+
+    function sendMessage(type) {
+      const user = document.getElementById("username").value;
+      const pass = document.getElementById("password").value;
+      const msg = JSON.stringify({ type, username: user, password: pass });
+      socket.send(msg);
+    }
+
+    function register() {
+      sendMessage("register");
+    }
+
+    function login() {
+      sendMessage("login");
+    }
+
+    function choose(option) {
+      document.getElementById("status").innerText = "You chose to " + option.toUpperCase();
+      socket.send(JSON.stringify({ type: option }));
+    }
+  </script>
+</body>
+</html>
+

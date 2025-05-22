@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tic Tac Toe WebSocket</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+    }
+    #login, #game, #playwatch {
+      margin-top: 20px;
+    }
+    #board {
+      display: grid;
+      grid-template-columns: repeat(3, 100px);
+      grid-gap: 5px;
+      margin: 20px auto;
+      width: 310px;
+    }
+    .cell {
+      width: 100px;
+      height: 100px;
+      font-size: 2em;
+      background-color: #f0f0f0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+    }
+    .cell.disabled {
+      pointer-events: none;
+      background-color: #ddd;
+    }
+    #status {
+      font-weight: bold;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Tic Tac Toe</h1>
+
+  <div id="login">
+    <input type="text" id="username" placeholder="Username">
+    <input type="password" id="password" placeholder="Password">
+    <button onclick="register()">Register</button>
+    <button onclick="login()">Login</button>
+    <p id="loginStatus"></p>
+  </div>
+
+  <div id="playwatch" style="display: none;">
+    <button onclick="play()">Play</button>
+    <button onclick="watch()">Watch</button>
+  </div>
+
+  <div id="game" style="display: none;">
+    <div id="board"></div>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    let socket = new WebSocket("ws://" + location.hostname + ":8080");
+    let myTurn = false;
+
+    socket.onmessage = function (event) {
+      const msg = JSON.parse(event.data);
+      console.log("Received:", msg);
+
+      if (msg.type === "REGISTER_SUCCESS") {
+        document.getElementById("loginStatus").innerText = "Registered! You can now log in.";
+      } else if (msg.type === "REGISTER_FAIL") {
+        document.getElementById("loginStatus").innerText = "Username already exists.";
+      } else if (msg.type === "LOGIN_SUCCESS") {
+        document.getElementById("login").style.display = "none";
+        document.getElementById("playwatch").style.display = "block";
+      } else if (msg.type === "LOGIN_FAIL") {
+        document.getElementById("loginStatus").innerText = "Invalid credentials.";
+      } else if (msg.type === "WAITING_FOR_OPPONENT") {
+        document.getElementById("status").innerText = "Waiting for an opponent...";
+        document.getElementById("game").style.display = "block";
+      } else if (msg.type === "GAME_START") {
+        document.getElementById("playwatch").style.display = "none";
+        document.getElementById("game").style.display = "block";
+        myTurn = msg.yourTurn;
+        drawBoard();
+        updateStatus();
+      } else if (msg.type === "YOU_ARE_WATCHING") {
+        document.getElementById("status").innerText = "Watching games...";
+        document.getElementById("game").style.display = "block";
+      }
+    };
+
+    function register() {
+      const user = document.getElementById("username").value;
+      const pass = document.getElementById("password").value;
+      socket.send(JSON.stringify({ type: "register", username: user, password: pass }));
+    }
+
+    function login() {
+      const user = document.getElementById("username").value;
+      const pass = document.getElementById("password").value;
+      socket.send(JSON.stringify({ type: "login", username: user, password: pass }));
+    }
+
+    function play() {
+      socket.send(JSON.stringify({ type: "play" }));
+    }
+
+    function watch() {
+      socket.send(JSON.stringify({ type: "watch" }));
+    }
+
+    function drawBoard() {
+      const board = document.getElementById("board");
+      board.innerHTML = "";
+      for (let i = 0; i < 9; i++) {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.id = "cell-" + i;
+        cell.innerText = "";
+        if (myTurn) {
+          cell.onclick = () => {
+            if (myTurn && cell.innerText === "") {
+              cell.innerText = "X";
+              myTurn = false;
+              updateStatus();
+              // Send move logic here (not implemented yet)
+            }
+          };
+        } else {
+          cell.classList.add("disabled");
+        }
+        board.appendChild(cell);
+      }
+    }
+
+    function updateStatus() {
+      document.getElementById("status").innerText = myTurn ? "Your turn!" : "Opponent's turn";
+    }
+  </script>
+</body>
+</html>
+
