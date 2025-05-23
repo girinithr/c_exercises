@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tic Tac Toe with Login, Play & Watch</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 40px;
+      background: #f0f4f8;
+      color: #333;
+    }
+    h2, h3 {
+      color: #2c3e50;
+    }
+    #auth-section, #menu-section, #game-section, #watch-section {
+      max-width: 360px;
+      margin: 20px auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+    }
+    input {
+      width: 90%;
+      padding: 10px;
+      margin: 8px 0;
+      border: 1px solid #aaa;
+      border-radius: 4px;
+      font-size: 16px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 10px 6px 0 6px;
+      border: none;
+      border-radius: 5px;
+      background: #3498db;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    button:hover:not(:disabled) {
+      background: #2980b9;
+    }
+    button:disabled {
+      cursor: not-allowed;
+      background: #aaa;
+    }
+    #board {
+      margin: 20px auto;
+      border-collapse: collapse;
+    }
+    #board td {
+      width: 80px;
+      height: 80px;
+      border: 3px solid #2980b9;
+      font-size: 48px;
+      font-weight: bold;
+      color: #2c3e50;
+      cursor: pointer;
+      user-select: none;
+      vertical-align: middle;
+    }
+    #board td.disabled {
+      cursor: default;
+      color: #999;
+      background-color: #ecf0f1;
+    }
+    #status {
+      margin-top: 15px;
+      font-weight: bold;
+      min-height: 24px;
+      color: #34495e;
+    }
+    #game-moves {
+      font-size: 14px;
+      color: #7f8c8d;
+      margin-top: 10px;
+      max-height: 100px;
+      overflow-y: auto;
+      text-align: left;
+      background: #e9f1f7;
+      padding: 6px 10px;
+      border-radius: 4px;
+      line-height: 1.3;
+    }
+    #watch-games-list {
+      list-style: none;
+      padding: 0;
+      max-height: 200px;
+      overflow-y: auto;
+      text-align: left;
+      margin: 10px 0 0 0;
+    }
+    #watch-games-list li {
+      padding: 8px;
+      border-bottom: 1px solid #ddd;
+      cursor: pointer;
+    }
+    #watch-games-list li:hover {
+      background-color: #D6EAF8;
+    }
+    #back-to-menu {
+      margin-top: 15px;
+      background: #e74c3c;
+    }
+  </style>
+</head>
+<body>
+  <h2>Tic Tac Toe Login & Play</h2>
+
+  <div id="auth-section">
+    <input id="username" placeholder="Username" autocomplete="off" />
+    <input id="password" placeholder="Password" type="password" autocomplete="off" />
+    <div>
+      <button onclick="registerUser()">Register</button>
+      <button onclick="loginUser()">Login</button>
+    </div>
+    <p id="status">Connecting to server...</p>
+  </div>
+
+  <div id="menu-section" style="display:none;">
+    <h3>Welcome, <span id="logged-in-user"></span>!</h3>
+    <button onclick="chooseMode('play')">Play</button>
+    <button onclick="chooseMode('watch')">Watch</button>
+  </div>
+
+  <div id="game-section" style="display:none;">
+    <h3 id="game-title"></h3>
+    <table id="board"></table>
+    <div id="status"></div>
+    <div id="game-moves"></div>
+    <button id="back-to-menu" onclick="returnToMenu()">Back to menu</button>
+  </div>
+
+  <div id="watch-section" style="display:none;">
+    <h3>Watch Games</h3>
+    <p id="watch-status">Loading games...</p>
+    <ul id="watch-games-list"></ul>
+    <table id="watch-board" style="display:none; margin: 20px auto; border-collapse: collapse;"></table>
+    <div id="watch-status-message" style="margin-top: 10px;"></div>
+    <button id="back-to-menu-watch" onclick="returnToMenu()">Back to menu</button>
+  </div>
+
+  <script>
+    const socket = new WebSocket("ws://localhost:8080");
+    let currentUser = null;
+    let playerSymbol = null;
+    let myTurn = false;
+    let gameMoves = [];
+    let gameActive = false;
+    let watchingGameId = null;
+
+    // Helper: create and reset game board UI
+    function createBoard(tableId, clickable = false) {
+      const board = document.getElementById(tableId);
+      board.innerHTML = "";
+      for(let r=0; r<3; r++) {
+        const row = board.insertRow();
+        for(let c=0; c<3; c++) {
+          const cell = row.insertCell();
+          cell.id = `${tableId}_cell_${r*3 + c}`;
+          cell.style.border = "3px solid #2980b9";
+          cell.style.width = "80px";
+          cell.style.height = "80px";
+          cell.style.fontSize = "48px";
+          cell.style.fontWeight = "bold";
+          cell.style.color = "#2c3e50";
+          cell.style.userSelect = "none";
+          cell.style.verticalAlign = "middle";
+          if (clickable) {
+            cell.style.cursor = 'pointer';
+            cell.addEventListener('click', () => handleCellClick(r*3 + c));
+          } else {
+            cell.style.cursor = 'default';
+          }
+          cell.innerText = "";
+        }
+      }
+    }
+
+    // Disable all clickable cells on board
+    function disableBoard(tableId) {
+      for(let i=0; i<9; i++) {
+        const cell = document.getElementById(`${tableId}_cell_${i}`);
+        if(cell) {
+          cell.style.cursor = "default";
+          cell.classList.add("disabled");
+        }
+      }
+    }
+
+    // Send JSON over websocket
+    function sendJSON(data) {
+      if(socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(data));
+      }
+    }
+
+    // Show status messages
+    function showStatus(text) {
+      const status = document.getElementById("status");
+      if(status) status.innerText = text;
+    }
+
+    // Show watch section status messages
+    function showWatchStatus(text) {
+      const watchStatus = document.getElementById("watch-status-message");
+      if(watchStatus) watchStatus.innerText = text;
+    }
+
+    socket.onopen = () => {
+      document.getElementById("status").innerText = "Connected to server";
+    };
+
+    socket.onclose = () => {
+      document.getElementById("status").innerText = "Disconnected from server";
+      disableBoard("board");
+      disableBoard("watch-board");
+    };
+
+    socket.onerror = () => {
+      document.getElementById("status").innerText = "WebSocket error";
+    };
+
+    socket.onmessage = (event) => {
+      const msg = event.data;
+      // The server might send raw string messages or JSON string
+      let data = null;
+      try {
+        data = JSON.parse(msg);
+      } catch(e) {
+        // msg not JSON, treat as raw message string
+      }
+
+      // Handle login/register result messages (strings)
+      if (msg === "LOGIN_SUCCESS") {
+        currentUser = document.getElementById("username").value;
+        document.getElementById("logged-in-user").innerText = currentUser;
+        document.getElementById("auth-section").style.display = "none";
+        document.getElementById("menu-section").style.display = "block";
+        showStatus("Logged in. Choose to play or watch.");
+        return;
+      } else if (msg === "LOGIN_FAIL") {
+        showStatus("Login failed. Check username/password.");
+        return;
+      } else if (msg === "REGISTER_SUCCESS") {
+        showStatus("Registration successful! Please log in.");
+        return;
+      } else if (msg === "REGISTER_FAIL") {
+        showStatus("Registration failed. Username may be taken.");
+        return;
+      }
+
+      // Handle structured messages for gameplay or watching
+      if (data && data.type) {
+        switch(data.type) {
+          case "WAITING_FOR_OPPONENT":
+            showStatus("Waiting for an opponent to join...");
+            break;
+          case "GAME_START":
+            startGame(data);
+            break;
+          case "GAME_UPDATE":
+            updateGame(data);
+            break;
+          case "GAME_END":
+            endGame(data);
+            break;
+          case "GAME_LIST":
+            showGameList(data.games);
+            break;
+          case "WATCH_START":
+            startWatch(data);
+            break;
+          case "WATCH_UPDATE":
+            updateWatchGame(data);
+            break;
+          case "WATCH_END":
+            endWatchGame(data);
+            break;
+          default:
+            console.warn("Unknown message type:", data.type);
+        }
+      }
+    };
+
+    function registerUser() {
+      const user = document.getElementById("username").value.trim();
+      const pass = document.getElementById("password").value.trim();
+      if (!user || !pass) {
+        showStatus("Username and password required.");
+        return;
+      }
+      sendJSON({ type: "register", username: user, password: pass });
+    }
+
+    function loginUser() {
+      const user = document.getElementById("username").value.trim();
+      const pass = document.getElementById("password").value.trim();
+      if (!user || !pass) {
+        showStatus("Username and password required.");
+        return;
+      }
+      sendJSON({ type: "login", username: user, password: pass });
+    }
+
+    function chooseMode(mode) {
+      sendJSON({ type: mode });
+      if (mode === "play") {
+        document.getElementById("menu-section").style.display = "none";
+        document.getElementById("game-section").style.display = "block";
+        document.getElementById("game-title").innerText = "Setting up game...";
+        createBoard("board", false);
+        showStatus("Waiting for opponent...");
+        gameMoves = [];
+        gameActive = false;
+      } else if (mode === "watch") {
+        document.getElementById("menu-section").style.display = "none";
+        document.getElementById("watch-section").style.display = "block";
+        showWatchStatus("Loading current games...");
+        sendJSON({ type: "list_games" });
+      }
+    }
+
+    function startGame(data) {
+      playerSymbol = data.symbol;
+      myTurn = (playerSymbol === 'X');
+      document.getElementById("game-title").innerText = `You are '${playerSymbol}'. ${myTurn ? "Your turn." : "Opponent's turn."}`;
+      createBoard("board", myTurn);
+      gameActive = true;
+      gameMoves = [];
+      showStatus(myTurn ? "Your turn." : "Opponent's turn.");
+    }
+
+    function handleCellClick(pos) {
+      if (!gameActive || !myTurn) return;
+      const cellId = `board_cell_${pos}`;
+      const cell = document.getElementById(cellId);
+      if (cell && cell.innerText === "") {
+        // Send move
+        sendJSON({ type: "move", position: pos });
+        // Optimistically disable further moves until update confirms
+        myTurn = false;
+        showStatus("Waiting for opponent move...");
+      }
+    }
+
+    function updateGame(data) {
+      // data: { type:"GAME_UPDATE", position: int, symbol: "X"|"O", nextTurn: "X"|"O" }
+      const pos = data.position;
+      const symbol = data.symbol;
+      const nextTurn = data.nextTurn;
+      const cell = document.getElementById(`board_cell_${pos}`);
+      if (cell && cell.innerText === "") {
+        cell.innerText = symbol;
+        if (symbol === playerSymbol) {
+          gameMoves.push(`You placed '${symbol}' at position ${pos+1}`);
+        } else {
+          gameMoves.push(`Opponent placed '${symbol}' at position ${pos+1}`);
+        }
+        // Update game moves display
+        const movesDiv = document.getElementById("game-moves");
+        movesDiv.innerHTML = gameMoves.map(m => `<div>${m}</div>`).join("");
+      }
+      myTurn = (nextTurn === playerSymbol);
+      showStatus(myTurn ? "Your turn." : "Opponent's turn.");
+      // Enable/disable board clicks based on turn
+      for(let i=0; i<9; i++) {
+        const cellElem = document.getElementById(`board_cell_${i}`);
+        if(cellElem && cellElem.innerText === "") {
+          cellElem.style.cursor = myTurn ? "pointer" : "default";
+          if(myTurn) {
+            cellElem.addEventListener("click", () => handleCellClick(i));
+          } else {
+            cellElem.replaceWith(cellElem.cloneNode(true)); // Remove all event listeners
+          }
+        }
+      }
+    }
+
+    function endGame(data) {
+      // data: { type:"GAME_END", result:"win"|"draw", winner: "X"|"O"|null }
+      let msg = "";
+      if (data.result === "win") {
+        msg = (data.winner === playerSymbol) ? "You won!" : "You lost.";
+      } else if (data.result === "draw") {
+        msg = "Game ended in a draw.";
+      }
+      showStatus(`Game Over: ${msg}`);
+      disableBoard("board");
+      gameActive = false;
+    }
+
+    // Watch mode: show list of games
+    function showGameList(games) {
+      // games is array of objects: { id, playerX, playerO }
+      const list = document.getElementById("watch-games-list");
+      const watchBoard = document.getElementById("watch-board");
+      const watchStatus = document.getElementById("watch-status");
+      list.innerHTML = "";
+      watchBoard.style.display = "none";
+      showWatchStatus("");
+
+      if (!games.length) {
+        watchStatus.innerText = "No active games available to watch.";
+        return;
+      }
+
+      watchStatus.innerText = "Select a game to watch:";
+      for(let game of games) {
+        let li = document.createElement("li");
+        li.innerText = `Game ${game.id}: ${game.playerX} (X) vs ${game.playerO} (O)`;
+        li.onclick = () => {
+          watchingGameId = game.id;
+          startWatchingGame(watchingGameId);
+        };
+        list.appendChild(li);
+      }
+    }
+
+    // Start watching a game
+    function startWatchingGame(gameId) {
+      document.getElementById("watch-games-list").style.display = "none";
+      document.getElementById("watch-status").style.display = "none";
+      const watchBoard = document.getElementById("watch-board");
+      watchBoard.style.display = "table";
+      createBoard("watch-board", false);
+      showWatchStatus("Watching game " + gameId);
+      // Request to watch game by id
+      sendJSON({ type: "watch_game", gameId });
+    }
+
+    function startWatch(data) {
+      // data: { type:"WATCH_START", gameId, playerX, playerO, board: [] }
+      createBoard("watch-board", false);
+      // board is array of 9 cells
+      for(let i=0; i<9; i++) {
+        const cell = document.getElementById(`watch-board_cell_${i}`);
+        if(cell) cell.innerText = data.board[i] || "";
+      }
+      showWatchStatus(`Watching game ${data.gameId}: ${data.playerX} (X) vs ${data.playerO} (O)`);
+    }
+
+    function updateWatchGame(data) {
+      // data: { type:"WATCH_UPDATE", position, symbol }
+      const pos = data.position;
+      const symbol = data.symbol;
+      const cell = document.getElementById(`watch-board_cell_${pos}`);
+      if (cell && cell.innerText === "") {
+        cell.innerText = symbol;
+      }
+    }
+
+    function endWatchGame(data) {
+      // data: { type:"WATCH_END", result, winner }
+      let msg = "";
+      if (data.result === "win") {
+        msg = `Game over: ${data.winner} won!`;
+      } else if (data.result === "draw") {
+        msg = `Game over: draw.`;
+      } else {
+        msg = `Game ended.`;
+      }
+      showWatchStatus(msg);
+    }
+
+    // Return to menu from any screen
+    function returnToMenu() {
+      playerSymbol = null;
+      myTurn = false;
+      gameActive = false;
+      watchingGameId = null;
+      gameMoves = [];
+
+      // Reset UI
+      document.getElementById("auth-section").style.display = "none";
+      document.getElementById("menu-section").style.display = "block";
+      document.getElementById("game-section").style.display = "none";
+      document.getElementById("watch-section").style.display = "none";
+
+      // Clear boards
+      createBoard("board", false);
+      createBoard("watch-board", false);
+
+      showStatus("");
+      showWatchStatus("");
+    }
+  </script>
+</body>
+</html>
+
+
